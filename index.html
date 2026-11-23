@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How AlphaGo Zero Works — 기보 없이, 탐색을 선생 삼아</title>
+<meta name="description" content="AlphaGo Zero(Silver et al., Nature 2017)를 따라가는 인터랙티브 교육 자료. 17장의 입력 평면, 몸통 하나에 머리 둘인 ResNet, 롤아웃 없는 MCTS와 PUCT, 탐색 결과 π를 라벨로 쓰는 자기대국 학습, 브라우저에서 실제로 도는 미니 AlphaZero, 3일·40일 학습 결과.">
+<style>
+:root{
+  color-scheme: light;
+  --surface-1:#fcfcfb;
+  --page:#f9f9f7;
+  --text-primary:#0b0b0b;
+  --text-secondary:#52514e;
+  --muted:#898781;
+  --grid:#e1e0d9;
+  --axis:#c3c2b7;
+  --border:rgba(11,11,11,0.10);
+  --s1:#2a78d6;
+  --s2:#eb6834;
+  --s3:#1baf7a;
+  --s4:#8b5cf6;
+  --s8:#e34948;
+  --warn:#fab219;
+  --good:#0ca30c;
+  --wash:rgba(42,120,214,0.08);
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --surface-1:#1a1a19;
+  --page:#0d0d0d;
+  --text-primary:#ffffff;
+  --text-secondary:#c3c2b7;
+  --muted:#898781;
+  --grid:#2c2c2a;
+  --axis:#383835;
+  --border:rgba(255,255,255,0.10);
+  --s1:#3987e5;
+  --s2:#d95926;
+  --s3:#199e70;
+  --s4:#a78bfa;
+  --s8:#e66767;
+  --warn:#fab219;
+  --good:#0ca30c;
+  --wash:rgba(57,135,229,0.14);
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%; scroll-behavior:smooth}
+body{
+  margin:0; background:var(--page); color:var(--text-primary);
+  font-family:system-ui,-apple-system,"Segoe UI","Apple SD Gothic Neo","Noto Sans KR",sans-serif;
+  font-size:16px; line-height:1.75; letter-spacing:-0.01em;
+}
+.wrap{max-width:880px;margin:0 auto;padding:0 16px 120px}
+header.hero{padding:56px 0 28px;border-bottom:1px solid var(--border);margin-bottom:8px}
+h1{font-size:clamp(28px,5.2vw,42px);line-height:1.25;margin:0 0 12px;letter-spacing:-0.03em}
+.sub{color:var(--text-secondary);font-size:17px;margin:0}
+.kicker{font-size:12px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);font-weight:600;margin:0 0 10px}
+h2{font-size:clamp(21px,3.4vw,27px);margin:56px 0 6px;letter-spacing:-0.02em;line-height:1.3}
+h3{font-size:18px;margin:34px 0 6px;letter-spacing:-0.015em}
+p{margin:12px 0}
+ul,ol{margin:12px 0;padding-left:22px}
+li{margin:6px 0}
+strong{font-weight:650}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.9em;background:var(--wash);padding:1px 5px;border-radius:4px}
+a{color:var(--s1)}
+.demo{background:var(--surface-1);border:1px solid var(--border);border-radius:14px;padding:18px;margin:24px 0}
+.demo h4{margin:0 0 2px;font-size:15px;color:var(--text-primary);font-weight:650}
+.demo .cap{color:var(--muted);font-size:13px;margin:0 0 14px;line-height:1.6}
+canvas{display:block;width:100%;border-radius:8px;background:var(--surface-1);touch-action:manipulation}
+.ctrls{display:flex;flex-wrap:wrap;gap:14px 22px;margin:14px 0 4px;align-items:flex-end}
+.ctrl{flex:1 1 210px;min-width:170px}
+.ctrl label{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;color:var(--text-secondary);margin-bottom:4px;gap:10px}
+.ctrl label b{font-variant-numeric:tabular-nums;color:var(--text-primary);font-weight:650;font-size:13px}
+input[type=range]{width:100%;accent-color:var(--s1);height:22px;margin:0}
+.btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+button{font:inherit;font-size:13px;font-weight:600;padding:7px 14px;border-radius:8px;cursor:pointer;
+  border:1px solid var(--border);background:var(--surface-1);color:var(--text-primary);transition:background .12s}
+button:hover{background:var(--wash)}
+button[aria-pressed=true]{background:var(--wash);border-color:var(--s1)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12.5px;color:var(--text-secondary);margin:10px 0 0}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:14px;height:3px;border-radius:2px;display:inline-block}
+.readout{display:flex;flex-wrap:wrap;gap:8px 26px;margin-top:12px;font-size:13px;color:var(--text-secondary)}
+.readout b{display:block;font-size:19px;color:var(--text-primary);font-weight:650;line-height:1.3;letter-spacing:-0.02em;font-variant-numeric:tabular-nums}
+.eq{background:var(--surface-1);border:1px solid var(--border);border-left:3px solid var(--s1);
+  border-radius:0 10px 10px 0;padding:14px 18px;margin:18px 0;overflow-x:auto;text-align:center}
+.eq .note{display:block;font-size:12.5px;color:var(--muted);margin:6px 0 0;line-height:1.55;text-align:left}
+.tw{overflow-x:auto;margin:18px 0;border:1px solid var(--border);border-radius:12px;background:var(--surface-1)}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{padding:9px 13px;text-align:left;border-bottom:1px solid var(--border);vertical-align:middle}
+th{font-weight:650;font-size:12.5px;color:var(--text-secondary);background:var(--page)}
+tr:last-child td{border-bottom:none}
+td.num,th.num{font-variant-numeric:tabular-nums;text-align:right}
+td.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+.note{border-left:3px solid var(--axis);padding:2px 0 2px 16px;margin:18px 0;color:var(--text-secondary);font-size:14.5px}
+.key{border:1px solid var(--border);border-left:3px solid var(--s2);background:var(--surface-1);
+  border-radius:0 10px 10px 0;padding:14px 18px;margin:20px 0}
+.key .lbl{font-size:11.5px;font-weight:700;letter-spacing:0.1em;color:var(--s2);display:block;margin-bottom:4px}
+.key p{margin:0}
+nav.toc{background:var(--surface-1);border:1px solid var(--border);border-radius:14px;padding:18px 22px;margin:26px 0}
+nav.toc ol{margin:6px 0 0;padding-left:20px;font-size:14.5px}
+nav.toc a{text-decoration:none;color:var(--text-primary)}
+nav.toc a:hover{color:var(--s1)}
+.q{border:1px solid var(--border);border-radius:10px;background:var(--surface-1);padding:16px 18px;margin:14px 0}
+.q h4{margin:0 0 8px;font-size:15px;color:var(--text-primary)}
+.q .opt{display:flex;gap:9px;align-items:flex-start;padding:7px 10px;border:1px solid var(--border);
+  border-radius:8px;margin:6px 0;cursor:pointer;font-size:14px;transition:border-color .12s}
+.q .opt:hover{border-color:var(--s1)}
+.q .opt input{margin-top:5px;accent-color:var(--s1)}
+.q .opt.correct{border-color:var(--good);background:rgba(12,163,12,0.08)}
+.q .opt.wrong{border-color:var(--s8);background:rgba(227,73,72,0.07)}
+.q .expl{display:none;font-size:13.5px;color:var(--text-secondary);border-left:3px solid var(--good);
+  padding:2px 0 2px 12px;margin-top:10px;line-height:1.65}
+.q .expl.bad{border-left-color:var(--s8)}
+.q .expl.show{display:block}
+.quiz-score{font-size:15px;font-weight:700;margin-top:14px}
+.tog{position:fixed;top:14px;right:14px;z-index:10;border-radius:999px;padding:7px 13px;
+  background:var(--surface-1);border:1px solid var(--border);font-size:12.5px}
+footer{margin-top:70px;padding-top:22px;border-top:1px solid var(--border);color:var(--muted);font-size:13px}
+footer a{color:var(--text-secondary)}
+.refs{font-size:13px;color:var(--text-secondary);line-height:1.7}
+.easy{background:var(--surface-1);border:1px solid var(--border);border-left:3px solid var(--s3);border-radius:0 14px 14px 0;padding:18px 20px;margin:24px 0}
+.easy .lbl{font-size:11.5px;font-weight:700;letter-spacing:0.1em;color:var(--s3);display:block;margin-bottom:2px}
+.easy h3{margin:0 0 8px}
+.easy ol{padding-left:20px}
+.easy .big{font-size:17px;text-align:center;margin:10px 0;font-weight:650}
+.sw{display:grid;grid-template-columns:150px 1fr 64px;gap:8px 10px;align-items:center;font-size:13px;margin-top:12px}
+.sw .bar{position:relative;height:18px;background:var(--page);border:1px solid var(--border);border-radius:4px}
+.sw .bar i{position:absolute;top:0;bottom:0;border-radius:3px}
+.sw .bar:after{content:'';position:absolute;left:50%;top:-3px;bottom:-3px;border-left:1px solid var(--axis)}
+.sw b{font-variant-numeric:tabular-nums;text-align:right}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media (max-width:640px){.split{grid-template-columns:1fr}}
+.split h5{margin:4px 0 0;font-size:13px;color:var(--text-secondary);font-weight:650}
+.flow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:13px;margin:16px 0;justify-content:center}
+.flow span{border:1px solid var(--border);background:var(--surface-1);border-radius:8px;padding:5px 10px;font-weight:600}
+.flow em{color:var(--muted);font-style:normal}
+sup.fn{font-size:0.72em;line-height:0;margin-left:1px}
+sup.fn a{text-decoration:none;font-weight:700;padding:0 2px}
+.footnotes{margin-top:64px;padding-top:18px;border-top:1px solid var(--border);font-size:14.5px;color:var(--text-secondary)}
+.footnotes h2{font-size:18px;margin:0 0 10px;color:var(--text-primary)}
+.footnotes ol{padding-left:22px}
+.footnotes li:target{background:var(--wash);border-radius:8px}
+.footnotes p{margin:10px 0}
+.footnotes .tw{font-size:13.5px}
+.footnotes .back{text-decoration:none;margin-left:4px}
+.pill{display:inline-block;font-size:11.5px;font-weight:700;padding:1px 8px;border-radius:999px;background:var(--wash);color:var(--s1);margin-left:6px;vertical-align:2px}
+
+@media (max-width:640px){.tog{position:absolute}}
+.ax-tp{color:var(--s1)}.ax-cp{color:var(--s4)}.ax-pp{color:var(--s2)}.ax-dp{color:var(--s3)}.ax-ep{color:var(--s8)}
+.tag{display:inline-block;font-size:11.5px;font-weight:700;padding:1px 8px;border-radius:999px;border:1px solid currentColor;margin-right:4px}
+svg.fig{display:block;width:100%;height:auto;margin:6px 0}
+svg.fig text{font-family:system-ui,-apple-system,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;fill:var(--text-primary)}
+svg.fig .m{fill:var(--muted)}
+.gpu{cursor:pointer}
+.info{font-size:13.5px;color:var(--text-secondary);margin-top:10px;line-height:1.7;min-height:3.4em}
+.info b{color:var(--text-primary)}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:9px;overflow:hidden;flex-wrap:wrap}
+.seg button{border:none;border-radius:0;border-right:1px solid var(--border)}
+.seg button:last-child{border-right:none}
+.mini{font-size:12.5px;color:var(--muted);margin:8px 0 0}
+pre{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:14px 16px;overflow-x:auto;font-size:13px;line-height:1.6;margin:18px 0}
+#a4tb th,#a4tb td{white-space:nowrap}
+pre code{background:none;padding:0;font-size:inherit}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+.chip{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;border:1px solid var(--border);border-radius:6px;padding:3px 8px;background:var(--page)}
+.chip.tok{border-color:var(--s1);background:var(--wash)}
+.chip.ok{border-color:var(--good);background:rgba(12,163,12,0.08)}
+.chip.bad{border-color:var(--s8);background:rgba(227,73,72,0.07)}
+.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13.5px;margin:8px 0}
+.row .lab{min-width:118px;color:var(--text-secondary);font-weight:600}
+.trace{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;line-height:1.7;background:var(--page);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin:8px 0;white-space:pre-wrap}
+.trace .w{color:var(--s8)}.trace .g{color:var(--good)}.trace .m{color:var(--muted)}
+.step-box{min-height:150px}
+.stepnav{display:flex;align-items:center;gap:10px;margin-top:12px;font-size:13px;color:var(--muted)}
+textarea,input[type=text]{width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13.5px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--page);color:var(--text-primary)}
+.big-out{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:15px;font-weight:650;letter-spacing:0.02em;word-break:break-all;margin:6px 0}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:999px;border:1px solid var(--border);color:var(--text-secondary);margin-left:6px;vertical-align:1px}
+.bars{display:grid;grid-template-columns:minmax(96px,150px) 1fr 58px;gap:9px 10px;align-items:center;font-size:13px;margin-top:6px}
+.bars .bar{height:18px;background:var(--page);border:1px solid var(--border);border-radius:4px;overflow:hidden}
+.bars .bar i{display:block;height:100%;border-radius:3px}
+.bars b{font-variant-numeric:tabular-nums;text-align:right}
+.pu{width:100%;border-collapse:collapse;font-size:13px}
+.pu th,.pu td{padding:6px 8px;border-bottom:1px solid var(--border)}
+.pu td.b{width:34%}
+.pu .tr{position:relative;height:14px;background:var(--page);border:1px solid var(--border);border-radius:3px}
+.pu .tr i{position:absolute;left:0;top:0;bottom:0;border-radius:2px}
+.pu tr.best td:first-child{font-weight:700;color:var(--s3)}
+.ttt{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;max-width:300px}
+.ttt button{aspect-ratio:1;padding:0;font-size:13px;line-height:1.35;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;overflow:hidden}
+.ttt button .st{font-size:34px;font-weight:700;line-height:1}
+.ttt button .pp{color:var(--muted);font-size:11.5px;font-variant-numeric:tabular-nums}
+.ttt button .pi{color:var(--s1);font-weight:700;font-size:13px;font-variant-numeric:tabular-nums}
+.ttt button.top{border-color:var(--s1);background:var(--wash)}
+.ttt button:disabled{cursor:default;opacity:1}
+.loop text{font-size:13px}
+.loop .bx{fill:var(--surface-1);stroke:var(--axis)}
+.loop .hl{stroke:var(--s2)}
+.loop .ar{stroke:var(--muted);fill:none;stroke-width:1.5}
+</style>
+</head>
+<body>
+<button class="tog" id="themeBtn" type="button">◐ 다크</button>
+<div class="wrap">
+<header class="hero">
+  <p class="kicker">강화학습과 탐색 · Self-play</p>
+  <h1>How AlphaGo Zero Works — 기보 없이, 탐색을 선생 삼아</h1>
+  <p class="sub">2016년의 AlphaGo는 사람 기보 3천만 수를 흉내 내는 데서 출발했습니다. 2017년의 AlphaGo Zero는 기보를 한 장도 보지 않았습니다. 무작위 가중치에서 시작해 자기 자신과 490만 판을 두었고, 사흘 뒤 이세돌을 이긴 그 AlphaGo를 <strong>100 대 0</strong>으로 이겼습니다. 이 페이지는 Silver 외 「Mastering the Game of Go without Human Knowledge」(Nature 550, 2017)를 따라가며, 선생이 없는데 무엇을 정답 삼아 배웠는지를 브라우저에서 직접 실험해 봅니다.</p>
+</header>
+
+<div class="key">
+  <span class="lbl">이 자료의 축</span>
+  <p><strong>라벨의 출처가 사람에서 탐색으로 바뀌었다.</strong> 학습 식은 지도학습과 거의 같다. 정책 머리는 "정답 수의 분포"를 맞히고, 가치 머리는 "누가 이겼는지"를 맞힌다. 달라진 것은 정답을 누가 주느냐다. AlphaGo에서는 <span class="ax-ep"><strong>사람이 둔 수</strong></span>가 정답이었고, AlphaGo Zero에서는 <span class="ax-tp"><strong>자기 신경망으로 MCTS를 돌려 얻은 방문 분포 π</strong></span>가 정답이다. 탐색은 신경망 혼자 낸 답 p보다 항상 조금 더 나은 답 π를 내놓고, 신경망은 그 π를 따라 배우고, 더 나아진 신경망으로 탐색하면 π가 다시 나아진다. 이 고리가 전부다.</p>
+</div>
+
+<nav class="toc">
+  <strong>학습 경로</strong>
+  <ol>
+    <li><a href="#s1">무엇이 달라졌나: AlphaGo와 나란히 놓기</a></li>
+    <li><a href="#s2">입력: 돌만 적은 17장의 평면</a></li>
+    <li><a href="#s3">신경망: 몸통 하나, 머리 둘</a></li>
+    <li><a href="#s4">탐색: 롤아웃 없는 MCTS와 PUCT</a></li>
+    <li><a href="#s5">학습: 탐색이 선생이다</a></li>
+    <li><a href="#s6">직접 돌려 보기: 미니 AlphaZero</a></li>
+    <li><a href="#s7">파이프라인: 최적화 · 평가 · 자기대국</a></li>
+    <li><a href="#s8">결과: 3일과 40일</a></li>
+    <li><a href="#s9">무엇을 배웠고, 무엇을 받았나</a></li>
+    <li><a href="#s10">그 뒤: AlphaZero, MuZero, 추론 모델</a></li>
+    <li><a href="#s11">정리</a></li>
+    <li><a href="#s12">확인 퀴즈</a></li>
+  </ol>
+</nav>
+
+<p class="note">이 자료는 <a href="https://dev-jonghoonpark.github.io/how-alphago-works/" target="_blank" rel="noopener">How AlphaGo Works</a>(2016년 논문)의 다음 편입니다. 정책망·가치망·MCTS가 처음이라면 그쪽을 먼저 보는 편이 좋습니다. 본문의 수치는 논문 본문과 Methods, Extended Data 표에서 가져왔고, 데모는 원리를 보이는 작은 모형입니다. 6절의 학습기는 바둑이 아니라 틱택토를 둡니다.</p>
+
+<!-- ───────── 1 ───────── -->
+<h2 id="s1">1. 무엇이 달라졌나: AlphaGo와 나란히 놓기</h2>
+<p>논문 초록은 차이를 네 가지로 요약합니다. 사람 데이터 없이 자기대국 강화학습만 쓴다, 입력은 흑돌과 백돌뿐이다, 정책망과 가치망을 신경망 하나로 합쳤다, 몬테카를로 롤아웃 없이 신경망 평가만으로 탐색한다.</p>
+<div class="tw"><table>
+<tr><th></th><th>AlphaGo Fan / Lee (2016)</th><th>AlphaGo Zero (2017)</th></tr>
+<tr><td>학습 데이터</td><td>사람 기보(KGS)로 지도학습 → 자기대국으로 강화학습</td><td>자기대국만. 무작위 가중치에서 시작</td></tr>
+<tr><td>입력</td><td>48장: 돌, 활로, 축, 따냄 수 등 손으로 만든 특징</td><td>17장: 최근 8수의 내 돌·상대 돌 + 차례</td></tr>
+<tr><td>신경망</td><td>정책망과 가치망이 따로 (합성곱 12~13층)</td><td>하나의 ResNet 몸통 + 정책 머리 + 가치 머리</td></tr>
+<tr><td>리프 평가</td><td>가치망과 빠른 롤아웃을 섞음 (λ = 0.5)</td><td>가치 머리만. 롤아웃 없음</td></tr>
+<tr><td>정책 학습 목표</td><td>사람이 둔 수(지도학습), 이긴 판의 수(REINFORCE)</td><td>MCTS 방문 분포 π</td></tr>
+<tr><td>대국 시 하드웨어</td><td>Fan: GPU 176개 · Lee: TPU 48개 (분산)</td><td>TPU 4개가 달린 기계 한 대</td></tr>
+</table></div>
+<p>표의 줄마다 무언가가 <em>빠졌습니다</em>. 기보, 손으로 만든 특징, 두 번째 신경망, 롤아웃 정책. 그런데 더 강해졌습니다. 이 자료가 따라갈 질문은 하나입니다. <strong>빠진 자리를 무엇이 채웠는가.</strong> 답은 5절에 나오는 고리이고, 2~4절은 그 고리의 부품입니다.</p>
+
+<!-- ───────── 2 ───────── -->
+<h2 id="s2">2. 입력: 돌만 적은 17장의 평면</h2>
+<p>신경망의 입력은 19×19×17 크기의 0/1 텐서입니다.</p>
+<div class="eq">s<sub>t</sub> = [ X<sub>t</sub>, Y<sub>t</sub>, X<sub>t−1</sub>, Y<sub>t−1</sub>, …, X<sub>t−7</sub>, Y<sub>t−7</sub>, C ]
+<span class="note">X = 지금 둘 차례인 쪽의 돌 위치(8장), Y = 상대 돌 위치(8장), C = 흑 차례면 전부 1, 백 차례면 전부 0인 평면(1장)</span></div>
+<p>2016년 판은 "이 돌의 활로가 몇 개인가", "여기 두면 축이 성립하는가" 같은 계산 결과를 48장에 담아 줬습니다. Zero는 돌이 어디 있는지만 줍니다. 그런데 현재 판 한 장이 아니라 과거 여덟 수를 주는 이유는 무엇일까요. 논문의 설명은 두 줄입니다.</p>
+<ul>
+  <li><strong>과거 평면</strong>: 바둑은 같은 판 모양의 반복을 금지합니다(패). 지금 돌만 봐서는 어느 수가 금지인지 알 수 없으므로, 현재 판만으로는 상태가 완전히 관찰되지 않습니다.</li>
+  <li><strong>차례 평면 C</strong>: 판을 항상 "둘 차례인 쪽" 시점으로 적기 때문에 흑백이 사라집니다. 그런데 덤(7.5집)은 백만 받으므로, 내가 흑인지 백인지는 따로 알려 줘야 합니다.</li>
+</ul>
+
+<div class="demo">
+  <h4>데모 1 · 판을 두면 17장이 어떻게 채워지나</h4>
+  <p class="cap">7×7 판을 눌러 흑부터 번갈아 둡니다(따냄과 반복 금지가 적용됩니다). 오른쪽은 지금 둘 차례인 쪽이 받는 입력입니다. 윗줄이 X(내 돌), 아랫줄이 Y(상대 돌)이고 왼쪽이 현재, 오른쪽으로 갈수록 과거입니다. "패 예시"를 누른 뒤 표시된 자리에 두어 보세요.</p>
+  <div class="split">
+    <div><canvas id="g1" height="280"></canvas></div>
+    <div><canvas id="g1p" height="200"></canvas></div>
+  </div>
+  <div class="btns">
+    <button type="button" id="g1ko">패 예시 불러오기</button>
+    <button type="button" id="g1undo">한 수 무르기</button>
+    <button type="button" id="g1reset">초기화</button>
+  </div>
+  <p class="info" id="g1info"></p>
+</div>
+<p>패 예시에서 백이 방금 따인 자리에 다시 두려고 하면 거절됩니다. 그 수가 금지인 이유는 현재 평면 X<sub>t</sub>, Y<sub>t</sub> 어디에도 없고, 한 수 전 평면에 백돌이 그 자리에 있었다는 사실에만 남아 있습니다. 한 수를 둘 때마다 X와 Y가 서로 자리를 바꾸는 것도 확인해 보세요. 신경망은 흑과 백을 배우지 않고 "나"와 "상대"를 배웁니다.</p>
+
+<!-- ───────── 3 ───────── -->
+<h2 id="s3">3. 신경망: 몸통 하나, 머리 둘</h2>
+<p>신경망 f<sub>θ</sub>는 국면 s를 받아 두 가지를 한 번에 내놓습니다.</p>
+<div class="eq">(p, v) = f<sub>θ</sub>(s)
+<span class="note">p = 362개 수(361개 교차점 + 패스)에 대한 확률 벡터, v = 둘 차례인 쪽이 이길 전망을 나타내는 −1 ~ +1 사이의 수</span></div>
+<div class="tw"><table>
+<tr><th>부분</th><th>구성</th><th class="num">가중치 수</th></tr>
+<tr><td>합성곱 블록</td><td>3×3 conv 256채널 → BN → ReLU</td><td class="num">39,168</td></tr>
+<tr><td>잔차 블록 × 19 (또는 39)</td><td>[3×3 conv 256 → BN → ReLU → 3×3 conv 256 → BN] + 입력 → ReLU</td><td class="num">블록당 1,179,648</td></tr>
+<tr><td>정책 머리</td><td>1×1 conv 2채널 → BN → ReLU → FC 362</td><td class="num">261,876</td></tr>
+<tr><td>가치 머리</td><td>1×1 conv 1채널 → BN → ReLU → FC 256 → ReLU → FC 1 → tanh</td><td class="num">92,928</td></tr>
+<tr><td><strong>합계</strong></td><td>20블록 판 / 40블록 판</td><td class="num"><strong>약 2,280만 / 4,640만</strong></td></tr>
+</table></div>
+<p class="mini">가중치 수는 위 구성에서 이 자료가 직접 계산한 값이며 BN 파라미터와 편향은 뺐습니다. 논문에는 파라미터 수가 나오지 않습니다.</p>
+<p>가중치의 98% 이상이 몸통에 있고, 두 머리는 그 위에 얹힌 얇은 층입니다. "좋은 수가 어디인가"와 "누가 유리한가"는 같은 판 읽기를 공유한다는 뜻입니다. <a href="https://dev-jonghoonpark.github.io/how-alphago-works/#s7" target="_blank" rel="noopener">How AlphaGo Works §7</a>에서 본 "머리만 바꾸면 분류기가 평가함수가 된다"가 여기서는 설계가 됐습니다.</p>
+<p>이 선택이 얼마나 기여했는지 논문은 네 가지 조합으로 따로 쟀습니다(Figure 4). 같은 자기대국 데이터로 네 신경망을 학습시키고 같은 탐색에 끼웠습니다.</p>
+<div class="tw"><table>
+<tr><th></th><th>합성곱 12블록 (conv)</th><th>잔차 20블록 (res)</th></tr>
+<tr><td>정책·가치 따로 (sep)</td><td>sep-conv = AlphaGo Lee의 구조</td><td>sep-res · 약 600 Elo 이상 상승</td></tr>
+<tr><td>하나로 합침 (dual)</td><td>dual-conv</td><td><strong>dual-res = AlphaGo Zero</strong> · 다시 약 600 Elo 상승</td></tr>
+</table></div>
+<p>흥미로운 점은 머리를 합치면 <strong>사람 수 예측 정확도는 조금 떨어지는데</strong> 가치 오차가 줄고 기력은 오른다는 것입니다. 논문은 계산이 절약되는 것보다, 두 목표를 함께 맞히느라 표현이 한쪽에 치우치지 않게 되는 정규화 효과가 더 중요하다고 적었습니다. 잔차 연결이 왜 깊은 망을 학습 가능하게 하는지는 <a href="https://dev-jonghoonpark.github.io/how-resnet-work/" target="_blank" rel="noopener">How ResNet Works</a>에 있습니다.</p>
+
+<!-- ───────── 4 ───────── -->
+<h2 id="s4">4. 탐색: 롤아웃 없는 MCTS와 PUCT</h2>
+<p>탐색 트리의 간선 (s, a)마다 네 숫자를 둡니다. 방문 횟수 N, 가치 합 W, 평균 가치 Q = W / N, 사전확률 P. 시뮬레이션 한 번은 세 단계입니다.</p>
+<ol>
+  <li><strong>선택</strong>: 루트에서 출발해 매 노드에서 Q + U가 가장 큰 수를 따라 내려갑니다.</li>
+  <li><strong>확장과 평가</strong>: 처음 보는 국면(리프)에 닿으면 신경망을 <em>한 번</em> 부릅니다. p는 새 간선들의 P가 되고, v는 이 국면의 평가가 됩니다. 판을 끝까지 두어 보는 롤아웃은 없습니다.</li>
+  <li><strong>역전파</strong>: 내려온 길의 간선마다 N을 1 올리고 W에 v를 더합니다(한 수 올라갈 때마다 부호를 뒤집습니다).</li>
+</ol>
+<div class="eq">a = argmax<sub>a</sub> ( Q(s,a) + U(s,a) ),&nbsp;&nbsp; U(s,a) = c<sub>puct</sub> · P(s,a) · √(Σ<sub>b</sub> N(s,b)) / (1 + N(s,a))
+<span class="note">U는 사전확률이 높고 아직 덜 가 본 수에 주는 보너스다. 방문이 쌓일수록 분모가 커져 U는 줄고, 결국 Q가 높은 수가 선택을 지배한다. c<sub>puct</sub>의 값은 논문에 없고 "가우시안 프로세스 최적화로 골랐다"고만 나온다.</span></div>
+<p>1,600번의 시뮬레이션이 끝나면 루트의 방문 횟수로 수를 고릅니다.</p>
+<div class="eq">π(a | s<sub>0</sub>) = N(s<sub>0</sub>,a)<sup>1/τ</sup> / Σ<sub>b</sub> N(s<sub>0</sub>,b)<sup>1/τ</sup>
+<span class="note">τ = 1이면 방문 횟수에 비례해 뽑고, τ → 0이면 가장 많이 방문한 수를 고른다</span></div>
+
+<div class="demo">
+  <h4>데모 2 · 탐색은 사전확률을 어떻게 고쳐 쓰나</h4>
+  <p class="cap">루트에 후보 수가 여섯 개 있습니다. 회색 막대는 신경망의 사전확률 P, 파란 막대는 탐색이 끝났을 때의 π입니다. 각 수의 "실제 가치"는 숨겨져 있고, 시뮬레이션은 그 값에 잡음이 낀 평가만 돌려받습니다. 초록색 이름이 실제로 가장 좋은 수입니다.</p>
+  <div class="seg" id="p2pre">
+    <button type="button" data-k="0" aria-pressed="true">사전확률이 대체로 맞음</button>
+    <button type="button" data-k="1">좋은 수를 낮게 봄</button>
+    <button type="button" data-k="2">좋은 수를 거의 0으로 봄</button>
+  </div>
+  <div class="tw" style="margin-top:12px"><table class="pu" id="p2tb"></table></div>
+  <div class="ctrls">
+    <div class="ctrl"><label><span>c<sub>puct</sub> (탐험 강도)</span> <b id="p2cV">1.5</b></label><input type="range" id="p2c" min="1" max="50" value="15"></div>
+    <div class="ctrl"><label>온도 τ <b id="p2tV">1.0</b></label><input type="range" id="p2t" min="1" max="20" value="10"></div>
+    <div class="ctrl"><label><span><input type="checkbox" id="p2n"> 루트 디리클레 잡음 (ε = 0.25), α</span> <b id="p2aV">0.3</b></label><input type="range" id="p2a" min="3" max="200" value="30"></div>
+  </div>
+  <div class="btns">
+    <button type="button" id="p2s1">시뮬레이션 +1</button>
+    <button type="button" id="p2s50">+50</button>
+    <button type="button" id="p2s1600">1,600회까지</button>
+    <button type="button" id="p2r">처음부터</button>
+  </div>
+  <div class="readout">
+    <div>시뮬레이션<b id="p2N">0</b></div>
+    <div>최선 수의 사전확률 P<b id="p2P">—</b></div>
+    <div>최선 수의 π<b id="p2Pi">—</b></div>
+    <div>가장 많이 방문한 수<b id="p2Top">—</b></div>
+  </div>
+</div>
+<p>확인해 볼 것들입니다.</p>
+<ul>
+  <li><strong>"좋은 수를 낮게 봄"</strong>에서 1,600회까지 돌리면 π는 P와 다른 수를 고릅니다. 처음에는 P가 높은 수부터 가 보지만, 평가가 나쁘면 Q가 내려가고 방문이 다른 수로 옮겨 갑니다. 논문이 MCTS를 <strong>정책 개선 연산자</strong>라고 부르는 이유입니다.</li>
+  <li><strong>"좋은 수를 거의 0으로 봄"</strong>에서는 잡음 없이 아무리 돌려도 그 수를 찾지 못할 수 있습니다. U에 P가 곱해져 있어서, P가 0에 가까우면 한 번 가 볼 기회조차 오지 않기 때문입니다. 잡음을 켜고 "처음부터"를 몇 번 눌러 보세요. 잡음이 그 수에 떨어진 판에서는 탐색이 그 수를 발견합니다.</li>
+  <li><strong>c<sub>puct</sub></strong>를 아주 낮추면 처음 괜찮아 보인 수에 눌러앉고, 아주 높이면 P를 그대로 따라 고르게 퍼집니다.</li>
+  <li><strong>τ</strong>를 낮추면 같은 방문 횟수에서 π가 한 수로 뾰족해집니다.</li>
+</ul>
+<p>자기대국에서 루트에 섞는 잡음은 P(s,a) = (1 − ε)·p<sub>a</sub> + ε·η<sub>a</sub>, η ~ Dir(0.03), ε = 0.25입니다. α = 0.03은 수가 362개인 바둑에 맞춘 값으로, 표본을 뽑으면 몇 개 수에만 큰 값이 몰립니다. 논문의 표현으로는 "모든 수가 시도될 수 있게 하되, 나쁜 수는 탐색이 기각할 수 있게" 하는 장치입니다.</p>
+
+<!-- ───────── 5 ───────── -->
+<h2 id="s5">5. 학습: 탐색이 선생이다</h2>
+<p>이제 부품을 고리로 묶습니다. 자기대국의 매 수마다 현재 신경망으로 MCTS를 돌려 π를 얻고, π에서 수를 뽑아 둡니다. 판이 끝나 승패 z가 정해지면 그 판의 모든 국면이 학습 표본 (s, π, z)가 됩니다.</p>
+<div style="overflow-x:auto"><svg class="fig loop" style="min-width:640px" viewBox="0 0 760 190" role="img" aria-label="자기대국 학습 고리: 신경망이 p와 v를 내고, MCTS가 π를 만들고, 자기대국이 z를 만들고, 신경망이 π와 z를 따라 학습한다">
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--muted)"/></marker></defs>
+  <rect class="bx" x="8" y="30" width="160" height="64" rx="10"/>
+  <text x="88" y="56" text-anchor="middle" font-weight="650">신경망 f_θ</text><text class="m" x="88" y="77" text-anchor="middle">s → (p, v)</text>
+  <rect class="bx" x="206" y="30" width="160" height="64" rx="10"/>
+  <text x="286" y="56" text-anchor="middle" font-weight="650">MCTS 1,600회</text><text class="m" x="286" y="77" text-anchor="middle">p, v → π (p보다 강함)</text>
+  <rect class="bx" x="404" y="30" width="160" height="64" rx="10"/>
+  <text x="484" y="56" text-anchor="middle" font-weight="650">자기대국</text><text class="m" x="484" y="77" text-anchor="middle">π로 두고 끝에서 z</text>
+  <rect class="bx hl" x="602" y="30" width="150" height="64" rx="10"/>
+  <text x="677" y="56" text-anchor="middle" font-weight="650">표본 (s, π, z)</text><text class="m" x="677" y="77" text-anchor="middle">최근 50만 판</text>
+  <path class="ar" d="M168 62H204" marker-end="url(#ah)"/><path class="ar" d="M366 62H402" marker-end="url(#ah)"/><path class="ar" d="M564 62H600" marker-end="url(#ah)"/>
+  <path class="ar" d="M677 94V150H88V96" marker-end="url(#ah)"/>
+  <text x="382" y="142" text-anchor="middle" font-weight="650">학습: p를 π 쪽으로, v를 z 쪽으로</text>
+  <text class="m" x="382" y="174" text-anchor="middle">더 나아진 신경망 → 더 나아진 탐색 → 더 나아진 표본</text>
+</svg></div>
+<div class="eq">l = (z − v)<sup>2</sup> − π<sup>⊤</sup> log p + c‖θ‖<sup>2</sup>
+<span class="note">첫 항: 가치 머리가 승패를 맞히게 하는 평균제곱오차. 둘째 항: 정책 머리가 탐색 분포를 따르게 하는 교차 엔트로피. 셋째 항: L2 정규화(c = 10<sup>−4</sup>). 앞의 두 항은 같은 비중으로 더한다.</span></div>
+<p>이 식을 2016년 판의 지도학습과 나란히 놓으면 축이 보입니다.</p>
+<div class="tw"><table>
+<tr><th></th><th>정책의 정답</th><th>가치의 정답</th><th>정답을 만든 것</th></tr>
+<tr><td>AlphaGo SL 정책망</td><td>사람이 둔 수 (원-핫)</td><td>—</td><td class="ax-ep"><strong>사람</strong></td></tr>
+<tr><td>AlphaGo 가치망</td><td>—</td><td>RL 정책망끼리 둔 판의 승패</td><td>정책망 (탐색 없음)</td></tr>
+<tr><td><strong>AlphaGo Zero</strong></td><td>MCTS 방문 분포 π (분포 전체)</td><td>MCTS로 둔 자기대국의 승패 z</td><td class="ax-tp"><strong>신경망 + 탐색</strong></td></tr>
+</table></div>
+<p>논문은 이 구조를 <strong>정책 반복(policy iteration)</strong>으로 설명합니다. 탐색은 신경망의 p보다 "보통 훨씬 강한 수"를 고르는 π를 내놓으니 정책 개선이고, 그 강한 정책으로 끝까지 둔 결과 z는 그 정책의 가치를 재는 표본이니 정책 평가입니다. 신경망은 두 결과를 한 번의 순전파로 흉내 내도록 학습합니다. 다시 말해 <strong>1,600번의 탐색이 하는 일을 탐색 없이 내놓도록 증류</strong>하는 것입니다. 그러면 다음 탐색은 더 나은 출발점에서 1,600번을 쓰게 됩니다.</p>
+<div class="key"><span class="lbl">왜 무작위에서 시작해도 굴러가는가</span><p>학습 초기의 신경망은 아무것도 모르고 p도 v도 잡음이다. 그래도 고리가 도는 것은 탐색이 <strong>규칙이라는 진짜 정보</strong>를 쓰기 때문이다. 시뮬레이션이 종국에 닿으면 신경망 대신 실제 승패가 돌아온다. 그래서 끝내기 근처에서는 π가 p보다 확실히 낫고, z는 처음부터 진짜 승패다. 판의 끝에서 시작된 올바른 신호가 학습을 거듭하며 앞쪽 국면으로 번져 간다.</p></div>
+
+<!-- ───────── 6 ───────── -->
+<h2 id="s6">6. 직접 돌려 보기: 미니 AlphaZero</h2>
+<p>같은 알고리즘을 브라우저에서 처음부터 학습시켜 봅니다. 바둑은 사흘이 걸리므로 게임은 틱택토로 바꿨습니다. 나머지는 논문의 구성을 줄여 옮겼습니다.</p>
+<div class="tw"><table>
+<tr><th></th><th>AlphaGo Zero</th><th>이 데모</th></tr>
+<tr><td>게임</td><td>19×19 바둑</td><td>3×3 틱택토</td></tr>
+<tr><td>입력</td><td>내 돌 8장 + 상대 돌 8장 + 차례 1장</td><td>내 돌 1장 + 상대 돌 1장 (이력과 덤이 필요 없음)</td></tr>
+<tr><td>신경망</td><td>ResNet 20블록 → 정책 머리 + 가치 머리</td><td>은닉층 하나(64) → 정책 머리(9) + 가치 머리(tanh)</td></tr>
+<tr><td>탐색</td><td>PUCT MCTS 1,600회, 루트 디리클레 잡음</td><td>같은 PUCT MCTS, 횟수는 슬라이더</td></tr>
+<tr><td>손실</td><td>(z − v)² − π<sup>⊤</sup> log p + c‖θ‖²</td><td>같은 식, 모멘텀 0.9 SGD</td></tr>
+<tr><td>증강</td><td>회전·반사 8가지</td><td>회전·반사 8가지</td></tr>
+</table></div>
+
+<div class="demo">
+  <h4>데모 3 · 무작위 가중치에서 지지 않는 수까지</h4>
+  <p class="cap">반복 한 번마다 자기대국 16판을 두고 미니배치 64개짜리 갱신을 30번 합니다. 5회마다 <strong>완벽한 상대</strong>(미니맥스)와 선·후수를 바꿔 가며 두어 진 비율을 잽니다. 틱택토는 양쪽이 최선을 다하면 비기므로 "진 비율 0"이 도달할 수 있는 최고점입니다. 주황은 탐색 없이 p가 가장 큰 수만 두는 신경망, 파랑은 같은 신경망에 MCTS를 붙인 것입니다.</p>
+  <div class="split">
+    <div><h5>완벽한 상대에게 진 비율</h5><canvas id="a3a" height="220"></canvas></div>
+    <div><h5>손실 (가치 MSE · 정책 교차 엔트로피)</h5><canvas id="a3b" height="220"></canvas></div>
+  </div>
+  <div class="legend">
+    <span><i style="background:var(--s2)"></i>신경망만 (탐색 없음)</span>
+    <span><i style="background:var(--s1)"></i>신경망 + MCTS</span>
+    <span><i style="background:var(--s3)"></i>가치 손실</span>
+    <span><i style="background:var(--s4)"></i>정책 손실</span>
+  </div>
+  <div class="ctrls">
+    <div class="ctrl"><label>수마다 MCTS 시뮬레이션 <b id="a3sV">40</b></label><input type="range" id="a3s" min="2" max="100" value="40"></div>
+    <div class="ctrl"><label><span><input type="checkbox" id="a3n" checked> 루트 디리클레 잡음</span> <b></b></label></div>
+  </div>
+  <div class="btns">
+    <button type="button" id="a3go">학습 시작</button>
+    <button type="button" id="a3reset">가중치 초기화</button>
+  </div>
+  <div class="readout">
+    <div>반복<b id="a3it">0</b></div>
+    <div>자기대국 누적<b id="a3g">0판</b></div>
+    <div>신경망만 · 진 비율<b id="a3raw">—</b></div>
+    <div>+ MCTS · 진 비율<b id="a3m">—</b></div>
+    <div>신경망만 · 무작위 상대 승률<b id="a3rnd">—</b></div>
+  </div>
+</div>
+
+<div class="demo">
+  <h4>데모 4 · 방금 학습한 신경망의 머릿속</h4>
+  <p class="cap">빈 칸을 눌러 X와 O를 번갈아 놓습니다. 칸마다 회색 숫자는 정책 머리의 p, 파란 숫자는 그 p로 MCTS를 돌린 π입니다(둘 다 %). 가장 높은 π에 테두리가 생깁니다. 학습 전과 후에 같은 국면을 비교해 보세요.</p>
+  <div class="split">
+    <div><div class="ttt" id="b4"></div></div>
+    <div>
+      <div class="readout" style="margin-top:0">
+        <div>둘 차례<b id="b4turn">X</b></div>
+        <div>가치 머리 v<b id="b4v">—</b></div>
+        <div>탐색 후 루트 Q<b id="b4q">—</b></div>
+        <div>정답 (미니맥스)<b id="b4mm">—</b></div>
+      </div>
+      <div class="btns">
+        <button type="button" id="b4ai">AI가 두기</button>
+        <button type="button" id="b4new">새 판</button>
+      </div>
+      <p class="mini">v와 Q는 지금 둘 차례인 쪽의 시점입니다. +1은 승리, 0은 무승부, −1은 패배 전망입니다.</p>
+    </div>
+  </div>
+</div>
+<p>돌려 보면 논문의 주장 몇 가지가 작은 규모로 그대로 나타납니다.</p>
+<ul>
+  <li><strong>처음에는 파란 선이 주황 선보다 아래에 있습니다.</strong> 같은 신경망인데 탐색을 붙이면 덜 집니다. π가 p보다 나은 정책이라는 뜻이고, 이 차이가 학습 신호입니다.</li>
+  <li><strong>주황 선이 파란 선을 따라 내려옵니다.</strong> 신경망이 탐색의 결과를 흡수해서, 나중에는 탐색 없이도 지지 않게 됩니다. 논문에서 탐색 없는 신경망 단독의 Elo가 3,055로, 2015년 판 후이를 이긴 AlphaGo Fan(3,144)에 근접했던 것과 같은 현상입니다.</li>
+  <li><strong>시뮬레이션을 2~8로 낮추고 초기화한 뒤 다시 학습</strong>시키면 훨씬 느리거나 멈춥니다. 선생(π)이 학생(p)보다 나을 것이 없으면 배울 것이 없습니다.</li>
+  <li>데모 4에서 빈 판의 v를 보면 정답인 0이 아니라 0보다 조금 높게 나옵니다. 가치 머리가 배우는 것은 완벽한 대국의 결과가 아니라 <strong>탐험 잡음이 섞인 자기대국의 결과</strong>이고, 실수가 섞인 틱택토에서는 먼저 두는 쪽이 더 자주 이기기 때문입니다. v는 "이 정책으로 두면 누가 이기는가"의 추정값입니다.</li>
+</ul>
+<p class="note">곡선은 평가 대국 수가 적어 들쭉날쭉하고, 가끔 MCTS 쪽이 신경망 단독보다 더 지는 구간도 나옵니다. 가치 머리가 아직 틀린 국면에서 탐색이 그 틀린 평가를 믿고 수를 바꾸기 때문입니다. 탐색은 신경망이 대체로 맞을 때만 개선 연산자입니다.</p>
+
+<!-- ───────── 7 ───────── -->
+<h2 id="s7">7. 파이프라인: 최적화 · 평가 · 자기대국</h2>
+<p>실제 학습은 세 프로세스가 동시에 비동기로 돕니다.</p>
+<div class="tw"><table>
+<tr><th>프로세스</th><th>하는 일</th><th>논문의 설정</th></tr>
+<tr><td><strong>최적화</strong></td><td>최근 자기대국에서 표본을 뽑아 θ를 갱신</td><td>최근 50만 판에서 균등 추출, 미니배치 2,048(GPU 워커 64개 × 32), 모멘텀 0.9 SGD, 학습률 10<sup>−2</sup> → 10<sup>−3</sup>(40만 스텝) → 10<sup>−4</sup>(60만 스텝), 1,000스텝마다 체크포인트</td></tr>
+<tr><td><strong>평가</strong></td><td>새 체크포인트를 현재 최강과 대국시켜 교체 여부 결정</td><td>400판, 수마다 1,600회, τ → 0. 승률 55% 초과면 새 최강</td></tr>
+<tr><td><strong>자기대국</strong></td><td>현재 최강 신경망으로 표본 생성</td><td>한 번에 25,000판, 수마다 1,600회(약 0.4초). 첫 30수는 τ = 1, 이후 τ → 0. 루트에 Dir(0.03) 잡음</td></tr>
+</table></div>
+<p>세부 장치 몇 가지는 "왜 있는가"를 짚어 둘 만합니다.</p>
+<ul>
+  <li><strong>55% 관문</strong>: 새 신경망이 우연히 조금 이긴 것만으로 교체되면 자기대국 데이터의 질이 흔들립니다. 논문 표현으로 "잡음만으로 선택되는 것을 피하려는" 장치입니다.</li>
+  <li><strong>첫 30수만 τ = 1</strong>: 초반은 방문 횟수에 비례해 뽑아 다양한 국면을 만들고, 그 뒤는 가장 강한 수를 둡니다.</li>
+  <li><strong>기권</strong>: 질 것이 뻔한 판은 계산을 아끼려 기권합니다. 기준값은 "두었으면 이겼을 판을 기권한 비율"이 5% 아래가 되도록 자동으로 정하고, 그 비율을 재려고 자기대국의 10%는 기권 없이 끝까지 둡니다.</li>
+  <li><strong>대칭</strong>: 학습 표본은 회전·반사 8가지로 늘리고, 탐색 중 리프를 평가할 때도 8가지 중 하나를 무작위로 골라 넣습니다.</li>
+  <li><strong>병렬 탐색</strong>: 여러 스레드가 동시에 트리를 내려가며, 가상 손실로 서로 다른 리프를 고르게 합니다. 리프는 8개씩 묶어 신경망에 넣습니다. 둔 수 아래의 서브트리는 다음 수 탐색에 재사용합니다.</li>
+</ul>
+
+<!-- ───────── 8 ───────── -->
+<h2 id="s8">8. 결과: 3일과 40일</h2>
+<h3>20블록, 3일</h3>
+<p>자기대국 490만 판, 미니배치 70만 개. 36시간 만에 AlphaGo Lee(몇 달에 걸쳐 학습한 판)를 넘었고, 72시간 뒤 이세돌과 둔 바로 그 판의 AlphaGo Lee와 서울 대국과 같은 조건(2시간 제한)으로 붙어 <strong>100승 0패</strong>를 거뒀습니다. Zero는 TPU 4개짜리 기계 한 대, Lee는 TPU 48개를 쓰는 분산 판이었습니다.</p>
+<p>같은 20블록 신경망을 사람 기보(KGS)로 지도학습시킨 것과 비교한 결과가 이 논문에서 가장 생각할 거리가 많습니다.</p>
+<div class="tw"><table>
+<tr><th>프로 기보(GoKifu) 기준</th><th class="num">지도학습 (20블록)</th><th class="num">자기대국 (20블록, 3일)</th><th class="num">자기대국 (40블록, 40일)</th></tr>
+<tr><td>사람 수 예측 정확도 (높을수록 사람과 비슷)</td><td class="num"><strong>54.3%</strong></td><td class="num">49.0%</td><td class="num">51.3%</td></tr>
+<tr><td>승패 예측 MSE (낮을수록 좋음)</td><td class="num">0.207</td><td class="num"><strong>0.177</strong></td><td class="num">0.180</td></tr>
+<tr><td>기력</td><td colspan="3">자기대국 쪽이 24시간 안에 지도학습 쪽을 추월하고 이후 큰 차이로 앞섬 (Figure 3a)</td></tr>
+</table></div>
+<p class="mini">Extended Data 표 1·2. 지도학습 신경망의 KGS 테스트 정확도는 60.4%로, 2016년 논문의 12층 망(55.9%)보다 높은 당시 최고 기록이었습니다.</p>
+<p>자기대국으로 배운 신경망은 <strong>사람이 어디 둘지는 덜 맞히는데, 누가 이길지는 더 잘 맞히고, 실제로 더 잘 둡니다.</strong> 논문은 "AlphaGo Zero가 사람의 바둑과 질적으로 다른 전략을 배우고 있을 수 있다"고 적었습니다. 사람 수를 맞히는 정확도는 기력의 대리 지표였을 뿐 목표가 아니었던 셈입니다.</p>
+
+<h3>40블록, 40일</h3>
+<p>자기대국 2,900만 판, 미니배치 310만 개. 수마다 5초를 주고 내부 리그전을 돌린 Elo입니다.</p>
+<div class="demo">
+  <h4>Elo 비교 (Figure 6b)</h4>
+  <p class="cap">Fan·Lee는 분산 판(GPU 176개 · TPU 48개), Master와 Zero는 TPU 4개짜리 기계 한 대입니다. 맨 아래는 탐색 없이 p가 가장 큰 수만 두는 Zero의 신경망입니다.</p>
+  <div class="bars">
+    <span>AlphaGo Zero</span><div class="bar"><i style="width:100%;background:var(--s1)"></i></div><b>5,185</b>
+    <span>AlphaGo Master</span><div class="bar"><i style="width:93.7%;background:var(--s4)"></i></div><b>4,858</b>
+    <span>AlphaGo Lee</span><div class="bar"><i style="width:72.1%;background:var(--muted)"></i></div><b>3,739</b>
+    <span>AlphaGo Fan</span><div class="bar"><i style="width:60.6%;background:var(--muted)"></i></div><b>3,144</b>
+    <span>Zero 신경망만</span><div class="bar"><i style="width:58.9%;background:var(--s2)"></i></div><b>3,055</b>
+  </div>
+</div>
+<p>두 가지 비교가 중요합니다.</p>
+<ul>
+  <li><strong>Zero vs Master (89 대 11)</strong>: AlphaGo Master는 2017년 1월 온라인에서 정상급 프로들에게 60전 전승을 거둔 판으로, Zero와 같은 알고리즘·구조를 쓰되 <em>사람 기보와 손으로 만든 특징</em>을 사용했습니다. 즉 이 대결은 "사람 지식을 넣은 쪽 대 뺀 쪽"의 가장 깨끗한 비교이고, 뺀 쪽이 이겼습니다.</li>
+  <li><strong>Zero vs Zero 신경망만 (5,185 대 3,055)</strong>: 같은 가중치인데 탐색 유무로 2,000 Elo 넘게 벌어집니다. 탐색은 학습 때만 쓰는 도구가 아니라 둘 때도 필요합니다. 신경망은 탐색을 대체하지 않고 탐색의 출발점을 끌어올립니다.</li>
+</ul>
+
+<!-- ───────── 9 ───────── -->
+<h2 id="s9">9. 무엇을 배웠고, 무엇을 받았나</h2>
+<h3>스스로 찾아낸 것</h3>
+<p>논문은 학습 시간에 따라 어떤 정석(귀의 정형화된 수순)이 등장하는지 추적했습니다. 사람이 수백 년에 걸쳐 정리한 정석들이 차례로 나타났고, 일부는 나중에 버려졌으며, 결국은 알려지지 않았던 변화를 선호하게 됐습니다. 포석, 맥, 사활, 패, 끝내기, 수상전, 선수, 모양, 세력과 실리 같은 개념을 "제1원리에서" 발견했다고 논문은 적습니다.</p>
+<p>반대로 <strong>축</strong>은 아주 늦게 이해했습니다. 축은 사람이 바둑을 배울 때 가장 먼저 익히는 것 중 하나지만, 판 전체를 가로지르는 긴 수순을 끝까지 읽어야 결과가 나옵니다. 2016년 판은 축 성립 여부를 입력 평면으로 미리 계산해 줬고, Zero는 그것을 읽기로 알아내야 했습니다. 사람에게 쉬운 순서와 이 학습 방식에 쉬운 순서는 같지 않습니다.</p>
+<h3>그래도 주어진 것</h3>
+<p>"사람 지식 없이"는 "아무 정보 없이"가 아닙니다. 논문 Methods는 사용한 도메인 지식을 직접 나열합니다.</p>
+<ol>
+  <li><strong>규칙 전체</strong>: 수를 두면 판이 어떻게 변하는지, 어떤 수가 합법인지, 종국에서 누가 이겼는지. 탐색은 이 규칙으로 미래 국면을 만들어 냅니다. 양쪽이 패스하거나 722수(19·19·2)가 넘으면 끝냅니다.</li>
+  <li><strong>계가 방식</strong>: 트롬프–테일러 규칙. 영역 경계가 정리되기 전에 끝난 판도 기계적으로 점수를 낼 수 있습니다.</li>
+  <li><strong>판이 19×19 격자라는 것</strong>: 입력이 이미지 형태이고 신경망이 합성곱 구조입니다.</li>
+  <li><strong>대칭</strong>: 회전·반사해도 같은 게임이고, 덤을 빼면 흑백을 바꿔도 같은 게임입니다.</li>
+</ol>
+<p>이 밖에는 쓰지 않았다고 명시합니다. 롤아웃 정책도, 탐색 휴리스틱도 없고, 이전 프로그램들이 모두 쓰던 "자기 눈은 메우지 않는다"는 규칙조차 넣지 않았습니다. 다만 신경망 구조와 학습 하이퍼파라미터는 이미지 인식 분야의 성과에서 가져왔고, 탐색 하이퍼파라미터는 예비 학습 결과로 최적화했습니다.</p>
+
+<!-- ───────── 10 ───────── -->
+<h2 id="s10">10. 그 뒤: AlphaZero, MuZero, 추론 모델</h2>
+<ul>
+  <li><strong>AlphaZero</strong> (2017 공개 · Science 2018): 9절의 목록에서 바둑에만 해당하는 것(대칭 증강, 55% 관문 등)을 걷어 내고 같은 알고리즘으로 체스·쇼기·바둑을 모두 배웠습니다.</li>
+  <li><strong>MuZero</strong> (Nature 2020): 9절 목록의 1번, 규칙마저 주지 않았습니다. 탐색에 쓸 환경 모델을 함께 학습합니다.</li>
+  <li><strong>추론 모델</strong>: "계산을 더 써서 더 나은 답을 만들고(탐색), 그 답을 내도록 모델을 학습시킨다(증류)"는 고리는 바둑 밖에서도 반복됩니다. <a href="https://dev-jonghoonpark.github.io/how-o1-works/" target="_blank" rel="noopener">How o1 Works</a>의 테스트 시 계산과 <a href="https://dev-jonghoonpark.github.io/how-deepseek-r1-works/" target="_blank" rel="noopener">How DeepSeek-R1 Works</a>의 정답 보상 강화학습을 이 관점에서 다시 읽어 볼 수 있습니다. 다만 바둑에는 완벽한 규칙과 분명한 승패가 있었고, 언어에는 그런 채점기가 없다는 차이가 큽니다.</li>
+</ul>
+
+<!-- ───────── 11 ───────── -->
+<h2 id="s11">11. 정리</h2>
+<ul>
+  <li>AlphaGo Zero는 사람 기보, 손으로 만든 특징, 별도 정책망, 롤아웃을 모두 뺐다. 남은 것은 <strong>신경망 하나와 MCTS 하나</strong>다.</li>
+  <li>입력은 최근 8수의 내 돌·상대 돌과 차례를 적은 17장이다. 과거 평면은 반복 금지 때문에, 차례 평면은 덤 때문에 필요하다.</li>
+  <li>신경망은 ResNet 몸통 하나에 정책 머리와 가치 머리를 단다. 잔차 구조와 머리 합치기가 각각 약 600 Elo씩 기여했다.</li>
+  <li>MCTS는 리프에서 신경망을 한 번 부르고 PUCT로 선택한다. 탐색 결과 π는 신경망의 p보다 강하다.</li>
+  <li>학습은 p를 π에, v를 승패 z에 맞춘다. <strong>라벨을 사람이 아니라 자기 탐색이 만든다</strong>는 것이 핵심이고, 이것이 정책 반복이다.</li>
+  <li>3일 만에 AlphaGo Lee를 100:0, 40일 만에 AlphaGo Master를 89:11로 이겼다. 사람 수 예측은 지도학습보다 못하지만 승패 예측과 기력은 더 낫다.</li>
+  <li>규칙, 계가 방식, 격자 구조, 대칭은 주어졌다. "지식 없이"는 "사람의 기보와 요령 없이"라는 뜻이다.</li>
+</ul>
+
+<!-- ───────── 12 ───────── -->
+<h2 id="s12">12. 확인 퀴즈</h2>
+<div id="quiz"></div>
+<p class="quiz-score" id="quizScore"></p>
+
+<footer>
+<p><strong>참고 문헌</strong></p>
+<ul class="refs">
+<li>Silver, Schrittwieser, Simonyan et al. (2017), <em>Mastering the game of Go without human knowledge</em>, Nature 550, 354–359 — <a href="https://www.nature.com/articles/nature24270" target="_blank" rel="noopener">nature.com</a> · <a href="https://discovery.ucl.ac.uk/id/eprint/10045895/" target="_blank" rel="noopener">UCL Discovery (저자 원고)</a></li>
+<li>Silver, Huang, Maddison et al. (2016), <em>Mastering the game of Go with deep neural networks and tree search</em>, Nature 529, 484–489 — <a href="https://www.nature.com/articles/nature16961" target="_blank" rel="noopener">nature.com</a></li>
+<li>Silver, Hubert, Schrittwieser et al. (2018), <em>A general reinforcement learning algorithm that masters chess, shogi, and Go through self-play</em>, Science 362 — <a href="https://arxiv.org/abs/1712.01815" target="_blank" rel="noopener">arXiv:1712.01815</a></li>
+<li>Schrittwieser et al. (2020), <em>Mastering Atari, Go, chess and shogi by planning with a learned model</em>, Nature 588 — <a href="https://arxiv.org/abs/1911.08265" target="_blank" rel="noopener">arXiv:1911.08265</a></li>
+<li>He, Zhang, Ren &amp; Sun (2016), <em>Deep Residual Learning for Image Recognition</em> — <a href="https://arxiv.org/abs/1512.03385" target="_blank" rel="noopener">arXiv:1512.03385</a></li>
+<li>Rosin (2011), <em>Multi-armed bandits with episode context</em>, Annals of Mathematics and Artificial Intelligence 61 (PUCT)</li>
+<li>Tromp, <em>Tromp–Taylor rules</em> — <a href="https://tromp.github.io/go.html" target="_blank" rel="noopener">tromp.github.io/go.html</a></li>
+</ul>
+<p style="margin-top:18px"><a href="https://github.com/dev-jonghoonpark/how-ai-works">how-ai-works</a> 시리즈 · 모든 계산은 브라우저에서 실시간으로 이루어집니다.</p>
+</footer>
+</div>
+<script>
+/* ══════ 미니 AlphaZero (틱택토) 엔진 ══════ */
+function mulberry(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function gauss(r){var u=1-r(),v=r();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+function gamma(r,a){if(a<1)return gamma(r,a+1)*Math.pow(r(),1/a);
+  var d=a-1/3,c=1/Math.sqrt(9*d);for(;;){var x,v;do{x=gauss(r);v=1+c*x;}while(v<=0);v=v*v*v;var u=r();
+    if(u<1-0.0331*x*x*x*x)return d*v;if(Math.log(u)<0.5*x*x+d*(1-v+Math.log(v)))return d*v;}}
+function dirichlet(r,n,a){var o=[],s=0;for(var i=0;i<n;i++){var g=gamma(r,a)+1e-12;o.push(g);s+=g;}return o.map(function(x){return x/s;});}
+
+var LINES=[[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+/* 판은 항상 "둘 차례인 쪽 = +1" 시점으로 적는다 (AlphaGo Zero의 X/Y 평면과 같은 관점) */
+function tWin(b,who){for(var i=0;i<8;i++){var l=LINES[i];if(b[l[0]]===who&&b[l[1]]===who&&b[l[2]]===who)return true;}return false;}
+function tFull(b){for(var i=0;i<9;i++)if(!b[i])return false;return true;}
+function tPlay(b,a){var n=new Array(9);for(var i=0;i<9;i++)n[i]=-b[i];n[a]=-1;return n;} /* 두고 나서 관점을 뒤집는다 */
+function tTerm(b){ /* 방금 상대(−1)가 뒀다. 반환: null=진행 중, −1=둘 차례인 쪽 패배, 0=무승부 */
+  if(tWin(b,-1))return -1;if(tFull(b))return 0;return null;}
+/* 8가지 대칭 (회전 4 × 반사 2) */
+var SYM=(function(){var out=[];for(var k=0;k<8;k++){var m=[];for(var i=0;i<9;i++){var r=Math.floor(i/3),c=i%3,t;
+  if(k&4)c=2-c;for(var q=0;q<(k&3);q++){t=r;r=c;c=2-t;}m.push(r*3+c);}out.push(m);}return out;})();
+
+/* 완전 탐색(미니맥스) — 평가용 정답지 */
+var MM={};
+function mmVal(b){var k=b.join(',');if(k in MM)return MM[k];var t=tTerm(b);if(t!==null)return MM[k]=t;
+  var best=-2;for(var a=0;a<9;a++)if(!b[a]){var v=-mmVal(tPlay(b,a));if(v>best)best=v;}return MM[k]=best;}
+function mmMoves(b){var best=mmVal(b),o=[];for(var a=0;a<9;a++)if(!b[a]&&-mmVal(tPlay(b,a))===best)o.push(a);return o;}
+
+/* 신경망: 입력 18(내 돌 9 + 상대 돌 9) → 은닉 H(ReLU) → 정책 머리 9(softmax) + 가치 머리 1(tanh) */
+function Net(H,seed){var r=mulberry(seed||1);this.H=H;
+  this.W1=new Float64Array(18*H);this.b1=new Float64Array(H);
+  this.Wp=new Float64Array(H*9);this.bp=new Float64Array(9);
+  this.Wv=new Float64Array(H);this.bv=new Float64Array(1);
+  var i;for(i=0;i<18*H;i++)this.W1[i]=gauss(r)*Math.sqrt(2/18);
+  for(i=0;i<H*9;i++)this.Wp[i]=gauss(r)*0.1/Math.sqrt(H);
+  for(i=0;i<H;i++)this.Wv[i]=gauss(r)*0.1/Math.sqrt(H);
+  this.keys=['W1','b1','Wp','bp','Wv','bv'];this.m={};var s=this;
+  this.keys.forEach(function(k){s.m[k]=new Float64Array(s[k].length);});}
+Net.prototype.fwd=function(b){var H=this.H,h=new Float64Array(H),i,j;
+  for(j=0;j<H;j++)h[j]=this.b1[j];
+  for(i=0;i<9;i++){if(b[i]===1){for(j=0;j<H;j++)h[j]+=this.W1[i*H+j];}else if(b[i]===-1){for(j=0;j<H;j++)h[j]+=this.W1[(9+i)*H+j];}}
+  for(j=0;j<H;j++)if(h[j]<0)h[j]=0;
+  var lg=new Float64Array(9),mx=-1e9,a;
+  for(a=0;a<9;a++){var s=this.bp[a];for(j=0;j<H;j++)s+=h[j]*this.Wp[j*9+a];lg[a]=s;if(!b[a]&&s>mx)mx=s;}
+  var p=new Float64Array(9),z=0;for(a=0;a<9;a++)if(!b[a]){p[a]=Math.exp(lg[a]-mx);z+=p[a];}
+  for(a=0;a<9;a++)p[a]/=z;
+  var v=this.bv[0];for(j=0;j<H;j++)v+=h[j]*this.Wv[j];v=Math.tanh(v);
+  return {p:p,v:v,h:h};};
+/* 손실 l = (z − v)² − πᵀ log p + c‖θ‖²  — 논문의 식 (1) 그대로 */
+Net.prototype.train=function(batch,lr,c){var H=this.H,g={},s=this,n=batch.length,lv=0,lp=0,i,j,a;
+  this.keys.forEach(function(k){g[k]=new Float64Array(s[k].length);});
+  for(var t=0;t<n;t++){var ex=batch[t],b=ex.s,o=this.fwd(b);
+    lv+=(ex.z-o.v)*(ex.z-o.v);
+    for(a=0;a<9;a++)if(ex.pi[a]>0)lp-=ex.pi[a]*Math.log(o.p[a]+1e-12);
+    var dv=2*(o.v-ex.z)*(1-o.v*o.v),dh=new Float64Array(H);
+    for(a=0;a<9;a++){if(b[a])continue;var dl=o.p[a]-ex.pi[a];g.bp[a]+=dl;
+      for(j=0;j<H;j++){g.Wp[j*9+a]+=dl*o.h[j];dh[j]+=dl*this.Wp[j*9+a];}}
+    g.bv[0]+=dv;for(j=0;j<H;j++){g.Wv[j]+=dv*o.h[j];dh[j]+=dv*this.Wv[j];}
+    for(j=0;j<H;j++){if(o.h[j]<=0)continue;g.b1[j]+=dh[j];
+      for(i=0;i<9;i++){if(b[i]===1)g.W1[i*H+j]+=dh[j];else if(b[i]===-1)g.W1[(9+i)*H+j]+=dh[j];}}}
+  this.keys.forEach(function(k){var w=s[k],m=s.m[k],gk=g[k],dec=(k[0]==='W')?2*c:0;
+    for(var q=0;q<w.length;q++){m[q]=0.9*m[q]+gk[q]/n+dec*w[q];w[q]-=lr*m[q];}});
+  return {lv:lv/n,lp:lp/n};};
+
+/* MCTS: 간선마다 N, W, P.  a = argmax(Q + U),  U = c·P·√ΣN / (1+N) */
+function Node(b){this.b=b;this.t=tTerm(b);this.P=null;this.N=new Float64Array(9);this.W=new Float64Array(9);this.ch=new Array(9);this.n=0;}
+function expand(nd,net){var o=net.fwd(nd.b);nd.P=o.p;return o.v;}
+function simulate(nd,net,cp){ /* 반환값: nd에서 둘 차례인 쪽이 본 가치 */
+  if(nd.t!==null)return nd.t;
+  if(!nd.P)return expand(nd,net);
+  var best=-1e9,ba=-1,sq=Math.sqrt(nd.n),a;
+  for(a=0;a<9;a++){if(nd.b[a])continue;var q=nd.N[a]?nd.W[a]/nd.N[a]:0,u=cp*nd.P[a]*sq/(1+nd.N[a]);
+    if(q+u>best){best=q+u;ba=a;}}
+  if(!nd.ch[ba])nd.ch[ba]=new Node(tPlay(nd.b,ba));
+  var v=-simulate(nd.ch[ba],net,cp);
+  nd.N[ba]++;nd.W[ba]+=v;nd.n++;return v;}
+function search(b,net,sims,cp,noise,r){var root=new Node(b);expand(root,net);
+  if(noise){var leg=[];for(var a=0;a<9;a++)if(!b[a])leg.push(a);var eta=dirichlet(r,leg.length,noise.alpha);
+    var P=new Float64Array(9);leg.forEach(function(a,i){P[a]=(1-noise.eps)*root.P[a]+noise.eps*eta[i];});root.P=P;}
+  for(var i=0;i<sims;i++)simulate(root,net,cp);
+  return root;}
+function visitPi(root,tau){var pi=new Float64Array(9),s=0,a;
+  if(tau<0.05){var m=-1,ba=0;for(a=0;a<9;a++)if(root.N[a]>m){m=root.N[a];ba=a;}pi[ba]=1;return pi;}
+  for(a=0;a<9;a++){pi[a]=Math.pow(root.N[a],1/tau);s+=pi[a];}for(a=0;a<9;a++)pi[a]/=s;return pi;}
+function sample(p,r){var x=r(),acc=0;for(var a=0;a<9;a++){acc+=p[a];if(x<acc)return a;}for(a=8;a>=0;a--)if(p[a]>0)return a;return 0;}
+function argmaxLegal(p,b){var m=-1,ba=-1;for(var a=0;a<9;a++)if(!b[a]&&p[a]>m){m=p[a];ba=a;}return ba;}
+
+/* 자기대국 한 판 → (s, π, z) 표본들. 대칭 8배 증강 */
+function selfPlay(net,cfg,r){var b=[0,0,0,0,0,0,0,0,0],hist=[],ply=0,t;
+  while((t=tTerm(b))===null){
+    var root=search(b,net,cfg.sims,cfg.cp,cfg.noise?{alpha:cfg.alpha,eps:0.25}:null,r);
+    var pi=visitPi(root,1);hist.push({s:b,pi:pi});
+    var a=ply<cfg.tauMoves?sample(pi,r):argmaxLegal(root.N,b);
+    b=tPlay(b,a);ply++;}
+  var out=[],z=t; /* t는 마지막 국면에서 둘 차례인 쪽의 결과 */
+  for(var i=hist.length-1;i>=0;i--){z=-z;var h=hist[i];
+    for(var k=0;k<8;k++){var m=SYM[k],s2=new Array(9),p2=new Float64Array(9);
+      for(var q=0;q<9;q++){s2[m[q]]=h.s[q];p2[m[q]]=h.pi[q];}out.push({s:s2,pi:p2,z:z});}}
+  return {ex:out,len:hist.length,res:t===0?0:(hist.length%2?1:-1)};}
+
+/* 평가: 완벽한 상대(미니맥스, 최선 수 중 무작위)와 선·후수로 두기 */
+function movePolicy(kind,net,b,sims,cp,r){
+  if(kind==='raw')return argmaxLegal(net.fwd(b).p,b);
+  if(kind==='mcts')return argmaxLegal(search(b,net,sims,cp,null,r).N,b);
+  if(kind==='perfect'){var mv=mmMoves(b);return mv[Math.floor(r()*mv.length)];}
+  var leg=[];for(var a=0;a<9;a++)if(!b[a])leg.push(a);return leg[Math.floor(r()*leg.length)];}
+function playMatch(kindA,kindB,net,sims,cp,games,r){var w=0,d=0,l=0;
+  for(var g=0;g<games;g++){var b=[0,0,0,0,0,0,0,0,0],aFirst=g%2===0,turnA=aFirst,t;
+    if(kindB==='perfect'||kindB==='random'){/* 첫 수를 다양하게: 상대가 선수면 그대로, A가 선수여도 그대로 */}
+    while((t=tTerm(b))===null){b=tPlay(b,movePolicy(turnA?kindA:kindB,net,b,sims,cp,r));turnA=!turnA;}
+    if(t===0)d++;else if(turnA)l++;else w++;}
+  return {w:w/games,d:d/games,l:l/games};}
+
+var $=function(s){return document.querySelector(s);};
+var cssCache={};
+function css(v){return v in cssCache?cssCache[v]:(cssCache[v]=getComputedStyle(document.documentElement).getPropertyValue(v).trim());}
+function setup(cv){
+  if(!cv.dataset.h)cv.dataset.h=cv.getAttribute('height');
+  var dpr=Math.min(2,window.devicePixelRatio||1), w=cv.clientWidth, h=+cv.dataset.h;
+  var bw=Math.round(w*dpr), bh=Math.round(h*dpr);
+  if(cv.width!==bw||cv.height!==bh){cv.width=bw;cv.height=bh;cv.style.height=h+'px';}
+  var c=cv.getContext('2d'); c.setTransform(dpr,0,0,dpr,0,0);
+  c.clearRect(0,0,w,h);
+  return {c:c,w:w,h:h};
+}
+function fmt(x,d){var s=(+x).toFixed(d==null?2:d);return (+s===0?s.replace('-',''):s).replace('-','−');}
+function font(c,sz,w){c.font=(w||'')+' '+sz+'px system-ui,-apple-system,"Apple SD Gothic Neo","Noto Sans KR",sans-serif';}
+function pct(x){return fmt(x*100,0)+'%';}
+
+/* ══════ 데모 1: 17장의 입력 평면 (7×7 바둑) ══════ */
+var G1={n:7,hist:[],turn:1,msg:'',mark:-1};
+function g1empty(){var b=[];for(var i=0;i<49;i++)b.push(0);return b;}
+function g1nb(i){var n=G1.n,r=Math.floor(i/n),c=i%n,o=[];if(r>0)o.push(i-n);if(r<n-1)o.push(i+n);if(c>0)o.push(i-1);if(c<n-1)o.push(i+1);return o;}
+function g1group(b,i){var col=b[i],seen={},st=[i],g=[],lib=0,ls={};seen[i]=1;
+  while(st.length){var x=st.pop();g.push(x);g1nb(x).forEach(function(y){
+    if(b[y]===0){if(!ls[y]){ls[y]=1;lib++;}}else if(b[y]===col&&!seen[y]){seen[y]=1;st.push(y);}});}
+  return {g:g,lib:lib};}
+function g1cur(){return G1.hist.length?G1.hist[G1.hist.length-1]:g1empty();}
+function g1try(i){var b=g1cur().slice(),me=G1.turn,op=3-me;
+  if(b[i])return '이미 돌이 있는 자리입니다.';
+  b[i]=me;var cap=0;
+  g1nb(i).forEach(function(y){if(b[y]===op){var gr=g1group(b,y);if(!gr.lib){gr.g.forEach(function(z){b[z]=0;cap++;});}}});
+  if(!g1group(b,i).lib)return '자충수(활로가 없는 자리)는 둘 수 없습니다.';
+  var key=b.join('');
+  for(var k=0;k<G1.hist.length;k++)if(G1.hist[k].join('')===key)
+    return '<b>반복 금지(패)</b>: 이 수를 두면 '+(G1.hist.length-k)+'수 전과 똑같은 판이 됩니다. 현재 평면 X<sub>t</sub>·Y<sub>t</sub>만 봐서는 이 자리가 왜 금지인지 알 수 없고, 과거 평면을 봐야 알 수 있습니다.';
+  G1.hist.push(b);G1.turn=op;
+  return cap?'돌 '+cap+'개를 따냈습니다.':'';}
+function g1geom(w,h){var n=G1.n,sz=Math.min(w,h)-8,cell=sz/n;return {x0:(w-sz)/2+cell/2,y0:(h-sz)/2+cell/2,cell:cell};}
+function g1draw(){
+  var o=setup($('#g1')),c=o.c,n=G1.n,gm=g1geom(o.w,o.h),b=g1cur(),i;
+  c.fillStyle='#e2c27f';c.beginPath();c.roundRect(gm.x0-gm.cell/2,gm.y0-gm.cell/2,gm.cell*n,gm.cell*n,8);c.fill();
+  c.strokeStyle='#7d6535';c.lineWidth=1;
+  for(i=0;i<n;i++){c.beginPath();c.moveTo(gm.x0,gm.y0+i*gm.cell);c.lineTo(gm.x0+(n-1)*gm.cell,gm.y0+i*gm.cell);c.stroke();
+    c.beginPath();c.moveTo(gm.x0+i*gm.cell,gm.y0);c.lineTo(gm.x0+i*gm.cell,gm.y0+(n-1)*gm.cell);c.stroke();}
+  for(i=0;i<49;i++){var x=gm.x0+(i%n)*gm.cell,y=gm.y0+Math.floor(i/n)*gm.cell;
+    if(b[i]){c.beginPath();c.arc(x,y,gm.cell*0.42,0,7);c.fillStyle=b[i]===1?'#1b1b1a':'#f7f6f1';c.fill();c.strokeStyle='#4a3c20';c.stroke();}
+    else if(i===G1.mark){c.beginPath();c.arc(x,y,gm.cell*0.2,0,7);c.strokeStyle='#d32f2f';c.lineWidth=2.5;c.stroke();c.lineWidth=1;}}
+  /* 평면 */
+  var pc=$('#g1p'),T=8,pad=4,lab=22,gs=Math.min((pc.clientWidth-lab-pad*(T-1))/T,56),cs=gs/n,H=G1.hist.length;
+  pc.dataset.h=Math.round(20+3*(gs+22));o=setup(pc);c=o.c;
+  var me=G1.turn,op=3-me,rows=[[me,'X','--s1'],[op,'Y','--s2']];
+  font(c,11,'600');c.textBaseline='middle';
+  rows.forEach(function(rw,ri){var y0=20+ri*(gs+22);
+    c.fillStyle=css(rw[2]);c.textAlign='left';c.fillText(rw[1],2,y0+gs/2);
+    for(var t=0;t<T;t++){var x0=lab+t*(gs+pad),bd=H-1-t>=0?G1.hist[H-1-t]:null;
+      c.fillStyle=css('--page');c.fillRect(x0,y0,gs,gs);c.strokeStyle=css('--border');c.strokeRect(x0+0.5,y0+0.5,gs-1,gs-1);
+      if(bd){c.fillStyle=css(rw[2]);for(var q=0;q<49;q++)if(bd[q]===rw[0])c.fillRect(x0+(q%n)*cs+0.5,y0+Math.floor(q/n)*cs+0.5,cs-1,cs-1);}
+      if(ri===0){c.fillStyle=css('--muted');c.textAlign='center';c.fillText(t?'t−'+t:'t',x0+gs/2,10);}}});
+  var yc=20+2*(gs+22);c.fillStyle=css('--s3');c.textAlign='left';c.fillText('C',2,yc+gs/2);
+  c.fillStyle=me===1?css('--s3'):css('--page');c.fillRect(lab,yc,gs,gs);c.strokeStyle=css('--border');c.strokeRect(lab+0.5,yc+0.5,gs-1,gs-1);
+  c.fillStyle=css('--text-secondary');font(c,12,'');
+  c.fillText(me===1?'흑 차례 → C는 전부 1':'백 차례 → C는 전부 0',lab+gs+10,yc+gs/2);
+  $('#g1info').innerHTML=(G1.msg?G1.msg+' ':'')+'지금 둘 차례: <b>'+(me===1?'흑':'백')+'</b> · 둔 수: '+(H)+'수 · 입력 텐서 7×7×17 = '+(49*17)+'칸';
+}
+function g1click(e){var cv=$('#g1'),r=cv.getBoundingClientRect(),gm=g1geom(r.width,r.height),n=G1.n;
+  var cx=Math.round((e.clientX-r.left-gm.x0)/gm.cell),cy=Math.round((e.clientY-r.top-gm.y0)/gm.cell);
+  if(cx<0||cy<0||cx>=n||cy>=n)return;G1.mark=-1;G1.msg=g1try(cy*n+cx);g1draw();}
+$('#g1').addEventListener('click',g1click);
+$('#g1reset').addEventListener('click',function(){G1.hist=[];G1.turn=1;G1.msg='';G1.mark=-1;g1draw();});
+$('#g1undo').addEventListener('click',function(){if(G1.hist.length){G1.hist.pop();G1.turn=3-G1.turn;G1.msg='';G1.mark=-1;g1draw();}});
+$('#g1ko').addEventListener('click',function(){G1.hist=[];G1.turn=1;
+  [[1,2],[1,3],[2,1],[2,4],[3,2],[3,3],[5,5],[2,2],[2,3]].forEach(function(m){g1try(m[0]*7+m[1]);});
+  G1.mark=2*7+2;G1.msg='흑이 방금 백돌 하나를 따냈습니다. 이제 백 차례입니다. <b>빨간 원 자리</b>에 두어 흑돌을 되따내 보세요.';g1draw();});
+
+/* ══════ 데모 2: PUCT ══════ */
+var P2PRE=[
+  {P:[0.42,0.24,0.14,0.10,0.06,0.04],q:[0.35,0.10,-0.05,-0.20,-0.30,-0.40]},
+  {P:[0.45,0.25,0.13,0.08,0.05,0.04],q:[0.05,-0.10,-0.25,0.10,0.45,-0.30]},
+  {P:[0.50,0.28,0.14,0.05,0.0298,0.0002],q:[0.05,-0.05,-0.20,-0.10,-0.30,0.50]}
+];
+var P2={k:0,N:[],W:[],P:[],n:0,r:mulberry(5),seed:5};
+var P2NAME=['A','B','C','D','E','F'];
+function p2reset(){var pre=P2PRE[P2.k];P2.N=[0,0,0,0,0,0];P2.W=[0,0,0,0,0,0];P2.n=0;P2.seed++;P2.r=mulberry(P2.seed*7919);
+  if($('#p2n').checked){var eta=dirichlet(P2.r,6,+$('#p2a').value/100);P2.P=pre.P.map(function(p,i){return 0.75*p+0.25*eta[i];});}
+  else P2.P=pre.P.slice();
+  p2draw();}
+function p2step(k){var pre=P2PRE[P2.k],cp=+$('#p2c').value/10;
+  for(var s=0;s<k;s++){var best=-1e9,ba=0,sq=Math.sqrt(P2.n);
+    for(var a=0;a<6;a++){var q=P2.N[a]?P2.W[a]/P2.N[a]:0,u=cp*P2.P[a]*sq/(1+P2.N[a]);if(q+u>best){best=q+u;ba=a;}}
+    var v=Math.max(-1,Math.min(1,pre.q[ba]+0.35*gauss(P2.r)));
+    P2.N[ba]++;P2.W[ba]+=v;P2.n++;}
+  p2draw();}
+function p2draw(){var pre=P2PRE[P2.k],cp=+$('#p2c').value/10,tau=+$('#p2t').value/10,al=+$('#p2a').value/100;
+  $('#p2cV').textContent=fmt(cp,1);$('#p2tV').textContent=fmt(tau,1);$('#p2aV').textContent=fmt(al,2);
+  var best=0,i;for(i=1;i<6;i++)if(pre.q[i]>pre.q[best])best=i;
+  var pi=[],z=0,top=0;for(i=0;i<6;i++){pi.push(Math.pow(P2.N[i],1/tau));z+=pi[i];if(P2.N[i]>P2.N[top])top=i;}
+  var sq=Math.sqrt(P2.n),h='<tr><th>수</th><th>사전확률 P</th><th>탐색 결과 π</th><th class="num">N</th><th class="num">Q</th><th class="num">U</th></tr>';
+  for(i=0;i<6;i++){var p=z?pi[i]/z:0,q=P2.N[i]?P2.W[i]/P2.N[i]:0,u=cp*P2.P[i]*sq/(1+P2.N[i]);
+    h+='<tr'+(i===best?' class="best"':'')+'><td>'+P2NAME[i]+'</td>'+
+      '<td class="b"><div class="tr"><i style="width:'+(P2.P[i]*100)+'%;background:var(--muted)"></i></div></td>'+
+      '<td class="b"><div class="tr"><i style="width:'+(p*100)+'%;background:var(--s1)"></i></div></td>'+
+      '<td class="num">'+P2.N[i]+'</td><td class="num">'+(P2.N[i]?fmt(q,2):'—')+'</td><td class="num">'+fmt(u,2)+'</td></tr>';}
+  $('#p2tb').innerHTML=h;
+  $('#p2N').textContent=P2.n;$('#p2P').textContent=fmt(P2.P[best]*100,1)+'%';
+  $('#p2Pi').textContent=z?fmt(pi[best]/z*100,1)+'%':'—';
+  $('#p2Top').textContent=P2.n?P2NAME[top]+(top===best?' (최선 수)':' (최선 수 아님)'):'—';}
+document.querySelectorAll('#p2pre button').forEach(function(b){b.addEventListener('click',function(){
+  document.querySelectorAll('#p2pre button').forEach(function(x){x.setAttribute('aria-pressed',x===b);});P2.k=+b.dataset.k;p2reset();});});
+$('#p2s1').addEventListener('click',function(){p2step(1);});
+$('#p2s50').addEventListener('click',function(){p2step(50);});
+$('#p2s1600').addEventListener('click',function(){if(P2.n<1600)p2step(1600-P2.n);});
+$('#p2r').addEventListener('click',p2reset);
+$('#p2c').addEventListener('input',p2draw);$('#p2t').addEventListener('input',p2draw);
+$('#p2a').addEventListener('input',function(){if($('#p2n').checked)p2reset();else p2draw();});
+$('#p2n').addEventListener('change',p2reset);
+
+/* ══════ 데모 3: 미니 AlphaZero 학습 ══════ */
+var A3={net:null,buf:[],it:0,games:0,run:false,r:null,seed:1,hist:[],loss:[],timer:null,CP:2.5};
+function a3init(){A3.seed++;A3.net=new Net(64,A3.seed*13+1);A3.r=mulberry(A3.seed*101);A3.buf=[];A3.it=0;A3.games=0;A3.hist=[];A3.loss=[];
+  a3eval();a3draw();b4draw();}
+function a3eval(){var er=mulberry(4242+A3.it),s=+$('#a3s').value;
+  var a=playMatch('raw','perfect',A3.net,0,A3.CP,40,er),b=playMatch('mcts','perfect',A3.net,s,A3.CP,24,er),c=playMatch('raw','random',A3.net,0,A3.CP,40,er);
+  A3.hist.push({it:A3.it,raw:a.l,m:b.l,rnd:c.w});}
+function a3iter(){var cfg={sims:+$('#a3s').value,cp:A3.CP,noise:$('#a3n').checked,alpha:0.6,tauMoves:9},i,s;
+  for(i=0;i<16;i++){var sp=selfPlay(A3.net,cfg,A3.r);for(s=0;s<sp.ex.length;s++)A3.buf.push(sp.ex[s]);}
+  if(A3.buf.length>12000)A3.buf.splice(0,A3.buf.length-12000);
+  var lv=0,lp=0;for(s=0;s<30;s++){var batch=[];for(i=0;i<64;i++)batch.push(A3.buf[Math.floor(A3.r()*A3.buf.length)]);
+    var L=A3.net.train(batch,0.03,1e-4);lv+=L.lv;lp+=L.lp;}
+  A3.it++;A3.games+=16;A3.loss.push({it:A3.it,lv:lv/30,lp:lp/30});
+  if(A3.it%5===0)a3eval();}
+function a3tick(){if(!A3.run)return;a3iter();a3draw();if(A3.it%5===0)b4draw();
+  if(A3.it>=400){A3.run=false;$('#a3go').textContent='학습 계속';return;}
+  A3.timer=setTimeout(a3tick,0);}
+function lineChart(cv,series,xmax,ymax,yfmt){var o=setup(cv),c=o.c,L=38,R=10,T=10,B=24,w=o.w-L-R,h=o.h-T-B;
+  function X(x){return L+x/xmax*w;}function Y(y){return T+h-Math.min(y,ymax)/ymax*h;}
+  font(c,11,'');c.textBaseline='middle';
+  for(var g=0;g<=4;g++){var yv=ymax*g/4;c.strokeStyle=css('--grid');c.lineWidth=1;c.beginPath();c.moveTo(L,Y(yv));c.lineTo(L+w,Y(yv));c.stroke();
+    c.fillStyle=css('--muted');c.textAlign='right';c.fillText(yfmt(yv),L-6,Y(yv));}
+  c.textAlign='center';c.textBaseline='top';for(g=0;g<=4;g++)c.fillText(Math.round(xmax*g/4),X(xmax*g/4),T+h+6);
+  series.forEach(function(s){if(!s.pts.length)return;c.strokeStyle=css(s.col);c.lineWidth=2;c.lineJoin='round';c.beginPath();
+    s.pts.forEach(function(p,i){if(i)c.lineTo(X(p[0]),Y(p[1]));else c.moveTo(X(p[0]),Y(p[1]));});c.stroke();
+    var e=s.pts[s.pts.length-1];c.fillStyle=css(s.col);c.beginPath();c.arc(X(e[0]),Y(e[1]),3,0,7);c.fill();});}
+function a3draw(){var xm=Math.max(100,Math.ceil(A3.it/100)*100);
+  lineChart($('#a3a'),[{col:'--s2',pts:A3.hist.map(function(d){return [d.it,d.raw];})},{col:'--s1',pts:A3.hist.map(function(d){return [d.it,d.m];})}],xm,1,function(v){return Math.round(v*100)+'%';});
+  var sm=[],k=5;for(var i=0;i<A3.loss.length;i++){var a=0,b=0,n=0;for(var j=Math.max(0,i-k+1);j<=i;j++){a+=A3.loss[j].lv;b+=A3.loss[j].lp;n++;}sm.push([A3.loss[i].it,a/n,b/n]);}
+  lineChart($('#a3b'),[{col:'--s3',pts:sm.map(function(d){return [d[0],d[1]];})},{col:'--s4',pts:sm.map(function(d){return [d[0],d[2]];})}],xm,2,function(v){return fmt(v,1);});
+  var e=A3.hist[A3.hist.length-1];
+  $('#a3it').textContent=A3.it;$('#a3g').textContent=A3.games.toLocaleString()+'판';
+  $('#a3raw').textContent=pct(e.raw);$('#a3m').textContent=pct(e.m);$('#a3rnd').textContent=pct(e.rnd);
+  $('#a3sV').textContent=$('#a3s').value;}
+$('#a3go').addEventListener('click',function(){A3.run=!A3.run;this.textContent=A3.run?'일시정지':'학습 계속';if(A3.run)a3tick();});
+$('#a3reset').addEventListener('click',function(){A3.run=false;clearTimeout(A3.timer);$('#a3go').textContent='학습 시작';a3init();});
+$('#a3s').addEventListener('input',function(){$('#a3sV').textContent=this.value;b4draw();});
+
+/* ══════ 데모 4: 신경망 들여다보기 ══════ */
+var B4={b:[0,0,0,0,0,0,0,0,0],ply:0};
+function b4draw(){var box=$('#b4'),b=B4.b,term=tTerm(b),xTurn=B4.ply%2===0,h='',o=null,root=null,pi=null,top=-1,i;
+  if(term===null){o=A3.net.fwd(b);root=search(b,A3.net,Math.max(+$('#a3s').value,20),A3.CP,null,mulberry(1));pi=visitPi(root,1);
+    for(i=0;i<9;i++)if(!b[i]&&(top<0||pi[i]>pi[top]))top=i;}
+  for(i=0;i<9;i++){
+    if(b[i]){var isX=(b[i]===1)===xTurn;h+='<button type="button" disabled><span class="st" style="color:var('+(isX?'--s1':'--s2')+')">'+(isX?'X':'O')+'</span></button>';}
+    else if(term!==null)h+='<button type="button" disabled></button>';
+    else h+='<button type="button" data-i="'+i+'"'+(i===top?' class="top"':'')+'><span class="pp">p '+Math.round(o.p[i]*100)+'</span><span class="pi">π '+Math.round(pi[i]*100)+'</span></button>';}
+  box.innerHTML=h;
+  box.querySelectorAll('button[data-i]').forEach(function(bt){bt.addEventListener('click',function(){b4play(+bt.dataset.i);});});
+  var mm=mmVal(b),mmS=mm>0?'+1 (이김)':mm<0?'−1 (짐)':'0 (비김)';
+  if(term===null){$('#b4turn').textContent=xTurn?'X':'O';$('#b4v').textContent=fmt(o.v,2);
+    var q=0;for(i=0;i<9;i++)q+=root.W[i];$('#b4q').textContent=fmt(q/Math.max(1,root.n),2);$('#b4mm').textContent=mmS;}
+  else{$('#b4turn').textContent=term===0?'무승부':((xTurn?'O':'X')+' 승리');$('#b4v').textContent='—';$('#b4q').textContent='—';$('#b4mm').textContent='끝';}
+  $('#b4ai').disabled=term!==null;}
+function b4play(a){if(B4.b[a]||tTerm(B4.b)!==null)return;B4.b=tPlay(B4.b,a);B4.ply++;b4draw();}
+$('#b4ai').addEventListener('click',function(){if(tTerm(B4.b)!==null)return;
+  var root=search(B4.b,A3.net,Math.max(+$('#a3s').value,20),A3.CP,null,mulberry(1));b4play(argmaxLegal(root.N,B4.b));});
+$('#b4new').addEventListener('click',function(){B4.b=[0,0,0,0,0,0,0,0,0];B4.ply=0;b4draw();});
+
+/* ══════ 퀴즈 ══════ */
+var QZ=[
+ {q:'AlphaGo Zero의 정책 머리가 학습할 때 맞히려는 정답은?',o:['사람 프로 기사가 둔 수','MCTS가 끝난 뒤 루트의 방문 횟수로 만든 분포 π','이긴 판에서 둔 수에만 +1을 주는 REINFORCE 신호','가치 머리의 출력'],a:1,e:'손실의 둘째 항은 −πᵀ log p입니다. 라벨을 사람이 아니라 자기 탐색이 만든다는 것이 이 논문의 핵심입니다.'},
+ {q:'입력에 과거 7수의 돌 위치가 들어가는 이유로 논문이 든 것은?',o:['합성곱이 시간 축을 요구해서','반복이 금지되어 있어 현재 돌만으로는 상태가 완전히 관찰되지 않아서','사람 기보와 형식을 맞추려고','롤아웃을 대신하려고'],a:1,e:'패처럼 "직전 판으로 되돌아가는 수"가 금지인지 여부는 과거 판을 봐야 알 수 있습니다. 차례 평면 C는 덤이 관찰되지 않기 때문에 필요합니다.'},
+ {q:'PUCT의 U(s,a) = c·P·√ΣN / (1+N)에서, 사전확률 P가 거의 0인 수는 어떻게 되나?',o:['Q가 높으니 곧바로 선택된다','보너스가 거의 0이라 한 번도 방문되지 않을 수 있고, 그러면 Q를 알 기회도 없다','항상 마지막에 한 번은 방문된다','탐색에서 삭제된다'],a:1,e:'그래서 자기대국에서는 루트 사전확률에 디리클레 잡음을 섞습니다. 모든 수가 시도될 수 있게 하되 나쁜 수는 탐색이 기각합니다.'},
+ {q:'AlphaGo Zero의 MCTS가 리프 국면을 평가하는 방법은?',o:['빠른 정책으로 끝까지 두어 본 결과(롤아웃)','롤아웃과 가치망의 평균','신경망을 한 번 불러 얻은 가치 v만 사용','미니맥스 완전 탐색'],a:2,e:'롤아웃이 없습니다. 2016년 판은 가치망과 롤아웃을 반반 섞었습니다.'},
+ {q:'논문이 MCTS를 "정책 개선 연산자"라고 부르는 근거는?',o:['MCTS가 가중치를 직접 갱신해서','탐색 확률 π가 신경망의 원래 확률 p보다 보통 훨씬 강한 수를 고르기 때문에','MCTS가 사람 기보를 참조해서','MCTS가 학습률을 조절해서'],a:1,e:'더 강한 π를 따라 p를 학습시키고, 그 π로 둔 판의 승패 z로 v를 학습시키는 것이 정책 반복입니다.'},
+ {q:'같은 20블록 신경망을 사람 기보로 지도학습한 것과 자기대국으로 학습한 것을 비교한 결과는?',o:['자기대국 쪽이 사람 수 예측도, 기력도 모두 높다','지도학습 쪽이 사람 수 예측도, 기력도 모두 높다','지도학습 쪽이 사람 수를 더 잘 맞히지만, 자기대국 쪽이 더 잘 둔다','차이가 없다'],a:2,e:'프로 기보 수 예측 54.3% 대 49.0%. 그런데 자기대국 쪽이 24시간 안에 기력에서 추월합니다. 논문은 사람과 질적으로 다른 전략을 배웠을 가능성을 언급합니다.'},
+ {q:'AlphaGo Zero(5,185)와 탐색 없는 같은 신경망(3,055)의 Elo 차이가 말해 주는 것은?',o:['신경망이 탐색을 완전히 대체했다','학습이 끝난 뒤에도 탐색이 기력의 큰 부분을 차지한다','탐색은 학습 때만 필요하다','Elo 계산이 잘못됐다'],a:1,e:'신경망은 탐색을 없애는 것이 아니라 탐색의 출발점을 높입니다. 그래도 신경망 단독이 AlphaGo Fan(3,144)에 근접한다는 점은 탐색 결과가 많이 흡수됐음을 보여 줍니다.'},
+ {q:'다음 중 AlphaGo Zero에 주어지지 <strong>않은</strong> 것은?',o:['바둑 규칙과 합법 수 목록','트롬프–테일러 계가','회전·반사 대칭','축이 성립하는지 알려 주는 입력 평면'],a:3,e:'축·활로 같은 손으로 만든 특징은 2016년 판의 48장 입력에 있던 것입니다. Zero는 축을 학습 후반에야 이해했습니다.'}
+];
+(function(){var box=$('#quiz'),score=0,done=0;
+  QZ.forEach(function(it,i){var d=document.createElement('div');d.className='q';
+    d.innerHTML='<h4>Q'+(i+1)+'. '+it.q+'</h4>'+it.o.map(function(o,j){return '<label class="opt"><input type="radio" name="q'+i+'" value="'+j+'"><span>'+o+'</span></label>';}).join('')+'<div class="expl"></div>';
+    box.appendChild(d);
+    d.querySelectorAll('input').forEach(function(inp){inp.addEventListener('change',function(){
+      if(d.dataset.done)return;d.dataset.done=1;done++;
+      var j=+inp.value,ok=j===it.a;if(ok)score++;
+      d.querySelectorAll('.opt').forEach(function(l,x){if(x===it.a)l.classList.add('correct');else if(x===j)l.classList.add('wrong');});
+      var ex=d.querySelector('.expl');ex.textContent=(ok?'정답! ':'오답. ')+it.e;ex.classList.add('show');if(!ok)ex.classList.add('bad');
+      $('#quizScore').textContent=done+'문제 중 '+score+'개 정답'+(done===QZ.length?' — 끝!':'');
+    });});
+  });
+})();
+
+/* ══════ 테마·초기화 ══════ */
+function drawAll(){g1draw();a3draw();}
+var tbtn=$('#themeBtn');
+if(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)document.documentElement.setAttribute('data-theme','dark');
+function syncBtn(){tbtn.textContent=document.documentElement.getAttribute('data-theme')==='dark'?'◑ 라이트':'◐ 다크';}
+tbtn.addEventListener('click',function(){var d=document.documentElement.getAttribute('data-theme')==='dark';
+  document.documentElement.setAttribute('data-theme',d?'light':'dark');cssCache={};syncBtn();drawAll();});
+syncBtn();cssCache={};g1draw();p2reset();a3init();
+var rz,lastW=document.documentElement.clientWidth;
+window.addEventListener('resize',function(){clearTimeout(rz);rz=setTimeout(function(){
+  var w=document.documentElement.clientWidth;if(w===lastW)return;lastW=w;drawAll();},120);});
+</script>
+</body>
+</html>
